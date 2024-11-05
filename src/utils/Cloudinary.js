@@ -20,11 +20,9 @@ const uploadOnCloudinary = async (locaFilePath) => {
         
     } catch (error) {
         fs.unlinkSync(locaFilePath) // remove the locally saved temporary file as the upload
+        return null
     }
 }
 
 
-cloudinary.v2.uploader.upload("https://res.cloudinary.com/demo/image/upload/getting-started/shoes.jpg",
-    {public_id: "olympic_flag"},
-    function (error, result) {console.log(result);}
-    );
+export { uploadOnCloudinary }
