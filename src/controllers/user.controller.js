@@ -3,18 +3,23 @@ import { ApiError } from "../utils/ApiError.js"
 import { User } from "../models/user.model.js"
 import { uploadOnCloudinary } from "../utils/cloudinary.js"
 import { ApiResponse } from "../utils/ApiResponse.js"
+import jwt from "jsonwebtoken"
 
-const generateAccessAndRefreshTokens = async(userId) => {
+const generateAccessAndRefreshTokens = async(userId) =>{
     try {
-        const user = User.findById(userId)
+        const user = await User.findById(userId)
         const accessToken = user.generateAccessToken()
         const refreshToken = user.generateRefreshToken()
 
         user.refreshToken = refreshToken
-        user.save({validateBeforeSave: save})
-        return {refreshToken, accessToken}
+        await user.save({ validateBeforeSave: false })
+
+        return {accessToken, refreshToken}
+
+
     } catch (error) {
-        throw new ApiError(500, "Something went worng while generating refersh and access token ")
+        console.error("Token Generation Error:", error);
+        throw new ApiError(500, "Something went wrong while generating referesh and access token")
     }
 }
 const registerUser = asyncHandler(async (req, res) => {
@@ -89,61 +94,69 @@ const registerUser = asyncHandler(async (req, res) => {
     )
 })
 
-const loginUser = asyncHandler(async (req, res) => {
-    // request body data
+const loginUser = asyncHandler(async (req, res) =>{
+    // req body -> data
     // username or email
     //find the user
-    // password check
-    // access and refresh token
-    // send cookies
-    
-    const {username, email, password} = req.body
+    //password check
+    //access and referesh token
+    //send cookie
 
-    if (!(username || email)) {
+    const {email, username, password} = req.body
+    console.log(email);
+
+    if (!username && !email) {
         throw new ApiError(400, "username or email is required")
     }
+    
+    // Here is an alternative of above code based on logic discussed in video:
+    // if (!(username || email)) {
+    //     throw new ApiError(400, "username or email is required")
+        
+    // }
 
     const user = await User.findOne({
         $or: [{username}, {email}]
     })
 
     if (!user) {
-        throw new ApiError(404, "user does not exist")
+        throw new ApiError(404, "User does not exist")
     }
 
-    const isPasswordValid = await user.isPassworCorrect(password)
+   const isPasswordValid = await user.isPasswordCorrect(password)
 
-    if (!isPasswordValid) {
-        throw new ApiError(401, "Invalid user credintials")
+   if (!isPasswordValid) {
+    throw new ApiError(401, "Invalid user credentials")
     }
 
     const {accessToken, refreshToken} = await generateAccessAndRefreshTokens(user._id)
 
-   const loggedInUser = User.findById(user._id).select("-password -refreshToken")
+    const loggedInUser = await User.findById(user._id).select("-password -refreshToken")
 
-   const option = {
-    httpOnly: true,
-    secure: true
-   }
+    const options = {
+        httpOnly: true,
+        secure: true
+    }
 
-   return res
-   .status(200)
-   .cookie("accessToken", accessToken, option)
-   .cookie("refreshToken", refreshToken, option)
-   .json(
+    return res
+    .status(200)
+    .cookie("accessToken", accessToken, options)
+    .cookie("refreshToken", refreshToken, options)
+    .json(
         new ApiResponse(
-            200,
+            200, 
             {
-                user:loggedInUser, accessToken, refreshToken
+                user: loggedInUser, accessToken, refreshToken
             },
             "User logged In Successfully"
         )
-   )
+    )
+
 })
 
 const logoutUser = asyncHandler(async(req, res) => {
     User.findByIdAndUpdate(
-        user.req._id,
+        req.user._id,
         {
             $set: {
                 refreshToken: undefined
@@ -166,8 +179,54 @@ const logoutUser = asyncHandler(async(req, res) => {
        .json(new ApiResponse(200, {}, "User logged Out"))
 })
 
+
+const refreshAccessToken = asyncHandler(async(req, res) => {
+    const incomingrefershToken = req.cookies.refreshToken || req.body.refreshToken
+
+    if (incomingrefershToken) {
+        throw new ApiError(401, "unauthorized request")
+    }
+
+    try {
+        const decodedToken = jwt.verify(incomingrefershToken, process.env.ACCESS_TOKEN_SECERT);
+    
+        const user = await User.fineById(decodedToken?._id)
+    
+        if (!user) {
+            throw new ApiError(401, "Invalid Refresh Token")
+        }
+    
+        if (incomingrefershToken !== user?.refreshToken) {
+            throw new ApiError(401, "Refresh token is expired or used")
+        }
+    
+        const options = {
+            httpOnly: true,
+            secure: true
+        }
+    
+        const {accessToken, newRefreshToken} = await generateAccessAndRefreshTokens(user._id)
+    
+        return res
+        .status(200)
+        .cookie("accessToken", accessToken, options)
+        .cookie("refreshToken", newRefreshToken, options)
+        .json(
+            new ApiResponse(
+                200, 
+                {
+                    accessToken, refreshToken: newRefreshToken
+                },
+                "Access Token Refreshed Successfully"
+            )
+        )
+    } catch (error) {
+        throw new ApiError(401, error?.message || "Invalid refresh token")
+    }
+})
 export{ 
     registerUser,
     loginUser,
-    logoutUser
+    logoutUser,
+    refreshAccessToken
 } 
